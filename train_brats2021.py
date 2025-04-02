@@ -23,7 +23,7 @@ from utils.optim import get_optimizer
 from utils.scheduler import get_scheduler
 
 
-def train(args, epoch, model, train_loader, loss_fn, optimizer, scheduler, scaler, writer, logger):
+def train(args, epoch, model, train_loader, loss_fn, optimizer, scheduler, scaler, writer, logger, DEVICE):
     model.train()
 
     data_time = AverageMeter('Data', ':6.3f')
@@ -35,11 +35,11 @@ def train(args, epoch, model, train_loader, loss_fn, optimizer, scheduler, scale
         len(train_loader), 
         [batch_time, data_time, bce_meter, dsc_meter, loss_meter],
         prefix=f"Train: [{epoch}]")
-
+    
     end = time.time()
     for i, (image, label, _, _) in enumerate(train_loader):
         # init
-        image, label = image.cuda(), label.float().cuda()
+        image, label = image.to(DEVICE), label.float().to(DEVICE)
         bsz = image.size(0)
         data_time.update(time.time() - end)
 
@@ -94,7 +94,7 @@ def train(args, epoch, model, train_loader, loss_fn, optimizer, scheduler, scale
         writer.add_scalar(f"train/{key}", value, epoch)
 
 
-def infer(args, epoch, model:nn.Module, infer_loader, writer, logger, mode:str, save_pred:bool=False):
+def infer(args, epoch, model:nn.Module, infer_loader, writer, logger, mode:str, save_pred:bool=False, DEVICE='cpu'):
     model.eval()
 
     batch_time = AverageMeter('Time', ':6.3f')
@@ -110,7 +110,7 @@ def infer(args, epoch, model:nn.Module, infer_loader, writer, logger, mode:str, 
         end = time.time()
         for i, (image, label, _, brats_names) in enumerate(infer_loader):
             # get data
-            image, label = image.cuda(), label.bool().cuda()
+            image, label = image.to(DEVICE), label.bool().to(DEVICE)
             bsz = image.size(0)
 
             # get seg map
@@ -179,14 +179,21 @@ def main():
     test_loader  = brats2021.get_infer_loader(args, test_cases)
 
     # model & stuff
-    # model = get_unet(args).cuda()
-    model = get_unet3D().cuda()
+    # model = get_unet(args).to(DEVICE)
+    ### Get Device
+    DEVICE = ""
+    if (torch.cuda.is_available()):
+        DEVICE = "cuda"
+    else:
+        DEVICE = "cpu"
+
+    model = get_unet3D().to(DEVICE)
 
     if args.data_parallel:
-        model = nn.DataParallel(model).cuda()
+        model = nn.DataParallel(model).to(DEVICE)
     optimizer = get_optimizer(args, model)
     scheduler = get_scheduler(args, optimizer)
-    loss = SoftDiceBCEWithLogitsLoss().cuda()
+    loss = SoftDiceBCEWithLogitsLoss().to(DEVICE)
     if args.amp:
         scaler = GradScaler()
         logger.info("==> Using AMP (Auto Mixed Precision)")
@@ -205,13 +212,13 @@ def main():
     best_model = {}
     val_leaderboard = LeaderboardBraTS()
     for epoch in range(args.epochs):
-        train(args, epoch, model, train_loader, loss, optimizer, scheduler, scaler, writer, logger)
+        train(args, epoch, model, train_loader, loss, optimizer, scheduler, scaler, writer, logger, DEVICE)
         
         # validation
         if ((epoch + 1) % args.eval_freq == 0):
             logger.info(f"==> Validation starts...")
             # inference on validation set
-            val_metrics = infer(args, epoch, model, val_loader, writer, logger, mode='val')
+            val_metrics = infer(args, epoch, model, val_loader, writer, logger, mode='val', DEVICE=DEVICE)
             
             # model selection
             val_leaderboard.update(epoch, val_metrics)

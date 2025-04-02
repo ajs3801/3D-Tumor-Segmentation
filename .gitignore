@@ -1,1 +1,13 @@
-data/brats2021/*
+__pycache__
+*/__pycache__
+*/*/__pycache__
+*.py[cod]
+*$py.class
+*.so
+# checkpoints
+data/brats2021
+data/experiments
+*.vscode
+*.json
+exps
+data
